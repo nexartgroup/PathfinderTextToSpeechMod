@@ -100,7 +100,7 @@ public class AppleVoiceUnity : MonoBehaviour
         }
         AppleVoiceUnity.Stop();
         text = EscapeForBash(text);
-        text = Main.NarratorVoice + " \"" + text + "\"";
+        text = "Sirisay" + Main.NarratorVoice + " \"" + text + "\"";
         if (Main.Settings.LogVoicedLines)
             Main.Logger.Log($"Final Speak Command: {text}");
         Process.Start(GetScriptPath(), text);
@@ -133,7 +133,7 @@ public class AppleVoiceUnity : MonoBehaviour
             {
                 string text3 = text.Substring(0, num);
                 text = text.Substring(num);
-                text2 = string.Format("{0}\"{1}\" \"{2}\";", new object[]
+                text2 = string.Format("{0}\"Sirisay{1}\" \"{2}\";", new object[]
                 {
                     text2,
                     AppleVoiceUnity.GenderVoice,
@@ -145,7 +145,7 @@ public class AppleVoiceUnity : MonoBehaviour
                 num = text.IndexOf("</color>", StringComparison.InvariantCultureIgnoreCase);
                 string text4 = text.Substring(0, num);
                 text = text.Substring(num);
-                text2 = string.Format("{0}\"{1}\" \"{2}\";", new object[]
+                text2 = string.Format("{0}\"Sirisay{1}\" \"{2}\";", new object[]
                 {
                     text2,
                     Main.NarratorVoice,
@@ -156,7 +156,7 @@ public class AppleVoiceUnity : MonoBehaviour
         text = text.Replace("\"", "");
         if (!string.IsNullOrWhiteSpace(text) && text != "</color>")
         {
-            text2 = string.Format("{0}\"{1}\" \"{2}\";", new object[]
+            text2 = string.Format("{0}\"Sirisay{1}\" \"{2}\";", new object[]
             {
                 text2,
                 AppleVoiceUnity.GenderVoice,
@@ -178,7 +178,7 @@ public class AppleVoiceUnity : MonoBehaviour
 
     public static string[] GetAvailableVoices()
     {
-        string str = "shortcuts list | grep '^Sirisay' | awk '{printf \\\"%s#Siri;\\\", $0}'";
+        string str = "shortcuts list | grep '^Sirisay' | sed 's/^Sirisay//' | awk '{printf \\\"%s#Siri;\\\", $0}'";
         Process process = new Process();
         process.StartInfo = new ProcessStartInfo
         {

@@ -26,7 +26,8 @@ public class Settings : UnityModManager.ModSettings
     public int FemaleVoice = 0;
     public int MaleVoice = 0;
 
-    public bool LogVoicedLines = true;
+    public bool LogVoicedLines = false;
+    public bool PlayBarks = false;
 
     public bool ColorOnHover = false;
     public float HoverColorR = 0f;

@@ -24,6 +24,16 @@ public static class MenuGUI
 
         GUILayout.EndVertical();
 #endif
+#if DEBUG
+        GUILayout.BeginVertical("", GUI.skin.box);
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Play Barks", GUILayout.ExpandWidth(false));
+        Main.Settings.PlayBarks = GUILayout.Toggle(Main.Settings.PlayBarks, "Enabled");
+        GUILayout.EndHorizontal();
+
+        GUILayout.EndVertical();
+#endif
         AddVoiceSelector("Narrator Voice - See nationality below", ref Main.Settings.NarratorVoice, ref m_NarratorPreviewText, ref Main.Settings.NarratorRate, ref Main.Settings.NarratorVolume, ref Main.Settings.NarratorPitch, VoiceType.Narrator);
 
         GUILayout.BeginVertical("", GUI.skin.box);

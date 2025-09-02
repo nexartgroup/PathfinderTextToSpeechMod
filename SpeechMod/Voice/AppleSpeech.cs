@@ -187,7 +187,7 @@ public class AppleSpeech : ISpeech
         {
             string text2 = PrepareDialogText(entry[0]);
             text2 = AppleVoiceUnity.EscapeForBash(text2);
-            string str = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ") + " " + entry[1] + " " + "\\\"" + text2 + "\\\"";
+            string str = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ") + " Sirisay" + entry[1] + " " + "\\\"" + text2 + "\\\"";
 
             await Task.Run(() =>
             {
@@ -233,15 +233,15 @@ public class AppleSpeech : ISpeech
 		switch (voiceType)
 		{
 			case VoiceType.Narrator:
-				formatted = $"\"{Main.NarratorVoice}\" \"{sanitized}\"";
+				formatted = $"\"Sirisay{Main.NarratorVoice}\" \"{sanitized}\"";
 				break;
 
 			case VoiceType.Female:
-				formatted = $"\"{Main.FemaleVoice}\" \"{sanitized}\"";
+				formatted = $"\"Sirisay{Main.FemaleVoice}\" \"{sanitized}\"";
 				break;
 
 			case VoiceType.Male:
-				formatted = $"\"{Main.MaleVoice}\" \"{sanitized}\"";
+				formatted = $"\"Sirisay{Main.MaleVoice}\" \"{sanitized}\"";
 				break;
 
 			default:
