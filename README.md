@@ -19,6 +19,20 @@ Known issue: If the mod is not showing in the mod manager, it might be due to in
 
 Disclaimer: I do NOT intend to support issues related to the NaturalVoicesSAPIAdapter application. If it looks like it is an issue with the WindowsVoice dll, I'll have a look at it.
 
+### Create voices for macOS:
+ 1. Open the Shortcuts app
+ <br>&emsp;On your Mac, press ⌘ + Space, type Shortcuts, and open the app.
+ 2. Create a new shortcut
+ <br>&emsp;Click the “+” button in the top toolbar to create a new shortcut.
+ <br>&emsp;Give it a name with this scheme, `Sirisay<Something\>`.
+ <br>&emsp;&emsp; *Example: SirisayHelen or Sirisay1*
+ 3. Add the “Speak” action
+ <br>&emsp;Search for Speak Text or Speak in the action library. Drag Speak Shortcut Input into your shortcut.
+ <br>&emsp;It should be set to: *Shortcut Input* as Source
+ <br>&emsp;Choose the voice you like.
+
+*You can copy and paste the shortcut to easily create more voices. (Remember the naming scheme <b>Sirisay</b>\<Something\>).*
+
 ### How to install
 
  1. Download and install Unity Mod Manager, make sure it is at least version 0.23.0 (I use 0.23.3)
