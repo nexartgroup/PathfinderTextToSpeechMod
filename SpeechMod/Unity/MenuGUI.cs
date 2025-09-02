@@ -13,6 +13,17 @@ public static class MenuGUI
 
     public static void OnGui()
     {
+
+#if DEBUG
+        GUILayout.BeginVertical("", GUI.skin.box);
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Log speech", GUILayout.ExpandWidth(false));
+        Main.Settings.LogVoicedLines = GUILayout.Toggle(Main.Settings.LogVoicedLines, "Enabled");
+        GUILayout.EndHorizontal();
+
+        GUILayout.EndVertical();
+#endif
         AddVoiceSelector("Narrator Voice - See nationality below", ref Main.Settings.NarratorVoice, ref m_NarratorPreviewText, ref Main.Settings.NarratorRate, ref Main.Settings.NarratorVolume, ref Main.Settings.NarratorPitch, VoiceType.Narrator);
 
         GUILayout.BeginVertical("", GUI.skin.box);
