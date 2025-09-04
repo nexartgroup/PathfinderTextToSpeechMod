@@ -108,10 +108,13 @@ public class AppleVoiceUnity : MonoBehaviour
 
     public static void SpeakDialog(string text, float delay = 0f, string gender = "")
     {
-        Main.Logger.Log($"SpeakerGender: {gender}");
-        Main.Logger.Log($"SpeakDialog: {text}");
+        if (Main.Settings.LogVoicedLines && !string.IsNullOrWhiteSpace(text))
+        {
+            Main.Logger.Log($"SpeakerGender: {gender}");
+            Main.Logger.Log($"SpeakDialog: {text}");
+        }
         if (!IsVoiceInitialized())
-            return;
+                return;
 
         if (delay > 0f)
         {

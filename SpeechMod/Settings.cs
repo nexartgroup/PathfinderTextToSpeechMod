@@ -28,6 +28,7 @@ public class Settings : UnityModManager.ModSettings
 
     public bool LogVoicedLines = false;
     public bool PlayBarks = false;
+    public bool PlayBarksSubtitles = false;
 
     public bool ColorOnHover = false;
     public float HoverColorR = 0f;
@@ -39,6 +40,7 @@ public class Settings : UnityModManager.ModSettings
     public bool[] FontStyles = [false, false, false, true, false, false, false, false, false, false, false];
 
     public bool InterruptPlaybackOnPlay = true;
+    public bool MuteOnPlay = true;
 
     public bool ShowNotificationOnPlaybackStop = true;
 

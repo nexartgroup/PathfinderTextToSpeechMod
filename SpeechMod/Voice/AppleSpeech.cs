@@ -6,16 +6,91 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Kingmaker.Blueprints;
+using Kingmaker.Sound;
+using System.Collections.Concurrent;
+using UnityEngine;
 
 
 namespace SpeechMod.Voice;
 
 public class AppleSpeech : ISpeech
 {
+    public sealed class WwiseDuckScope : IDisposable
+    {
+        private readonly float _prev;
+        private bool _done;
+
+        public WwiseDuckScope(float target01 = 0.2f)
+        {
+            if (!Main.Settings.MuteOnPlay)
+            {
+                _done = true;
+                return; // no ducking
+            }
+            // Wir sparen uns AKRESULT & GetRTPCValue, setzen direkt
+            _prev = 100f; // Standardwert annehmen, wenn du nicht lesen kannst
+            //AkSoundEngine.SetRTPCValue("AudioLevel", target01, null, 0);
+            AkSoundEngine.SetRTPCValue("VoiceLevel", target01, null, 0);
+            AkSoundEngine.SetRTPCValue("DialogueLevel", target01, null, 0);
+        }
+
+        public void Dispose()
+        {
+            if (_done) return;
+            _done = true;
+            //AkSoundEngine.SetRTPCValue("AudioLevel", _prev, null, 0);
+            AkSoundEngine.SetRTPCValue("VoiceLevel", _prev, null, 0);
+            AkSoundEngine.SetRTPCValue("DialogueLevel", _prev, null, 0);
+        }
+    }
+    public readonly struct SlncSegment
+    {
+        public readonly string Text;   // der zu sprechende Text (kann leer sein)
+        public readonly int? PauseMs;  // Pause NACH diesem Segment (null = keine Pause)
+
+        public SlncSegment(string text, int? pauseMs)
+        {
+            Text = text;
+            PauseMs = pauseMs;
+        }
+    }
+    static IEnumerable<SlncSegment> ParseSlnc(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            yield return new SlncSegment(string.Empty, null);
+            yield break;
+        }
+
+        // [[slnc 1000]]  -> erfasst 1000
+        var rx = new Regex(@"\[\[\s*slnc\s+(\d+)\s*\]\]", RegexOptions.IgnoreCase);
+        int last = 0;
+
+        foreach (Match m in rx.Matches(input))
+        {
+            // Text VOR dem Tag
+            string before = input.Substring(last, m.Index - last);
+            int pause = int.Parse(m.Groups[1].Value);
+
+            // Pause gilt NACH 'before'
+            yield return new SlncSegment(before, pause);
+
+            // weiter hinter dem Tag
+            last = m.Index + m.Length;
+        }
+
+        // Rest hinter dem letzten Tag (ohne folgende Pause)
+        if (last <= input.Length)
+        {
+            string tail = input.Substring(last);
+            yield return new SlncSegment(tail, null);
+        }
+    }
     private static string SpeakBegin => "";
     private static string SpeakEnd => "";
-    
+
     private static string SpeakerVoice => Game.Instance?.DialogController?.CurrentSpeaker?.Gender == Gender.Female ? Main.FemaleVoice : Main.MaleVoice;
     private static string SpeakerGender =>
     Game.Instance?.DialogController?.CurrentSpeaker?.Gender switch
@@ -74,11 +149,61 @@ public class AppleSpeech : ISpeech
         return text;
     }
 
-    private void SpeakInternal(string text, float delay = 0f)
+    private async Task SpeakInternal(string text, float delay = 0f)
     {
-        text = SpeakBegin + text + SpeakEnd;
-        AppleVoiceUnity.Speak(text, delay);
+        // vorbereiten: [[slnc N]] bleibt im Text enthalten
+        string prepared = PrepareDialogText(text);
+        var segments = ParseSlnc(prepared);
+
+        foreach (var seg in segments)
+        {
+            // 1) sprechen (nur wenn seg.Text nicht leer ist)
+            if (!string.IsNullOrWhiteSpace(seg.Text))
+            {
+                // Falls ein Startdelay gesetzt wurde, nur beim ersten Segment anwenden
+                if (delay > 0f)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(delay));
+                    delay = 0f; // nur einmal anwenden
+                }
+
+                string text2 = AppleVoiceUnity.EscapeForBash(seg.Text);
+                string script = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ");
+                string cmd = $"{script} Sirisay{Main.NarratorVoice} \\\"{text2}\\\"";
+
+                await Task.Run(() =>
+                {
+                    using (var process = new Process())
+                    {
+                        process.StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "/bin/bash",
+                            Arguments = "-c \"" + cmd + "\"",
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        };
+                        process.Start();
+                        if (Main.Settings.LogVoicedLines)
+                            Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
+                        process.WaitForExit();
+                    }
+                });
+            }
+
+            // 2) Pause danach (falls von [[slnc N]] vorgegeben)
+            if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
+            {
+                await Task.Delay(seg.PauseMs.Value);
+            }
+            else
+            {
+                await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+            }
+        }
     }
+
 
     public bool IsSpeaking()
     {
@@ -112,13 +237,13 @@ public class AppleSpeech : ISpeech
         text = Regex.Replace(text, @"<link[^>]*>(.*?)</link>", "$1", RegexOptions.Singleline);
         text = Regex.Replace(text, @"</?[^>]+>", "");
 
-		// text = FormatGenderSpecificVoices(text);
+        // text = FormatGenderSpecificVoices(text);
         return text;
     }
     public static List<string[]> BuildSpeakList(string input)
     {
         string narratorVoice = Main.NarratorVoice;
-        string defaultVoice  = SpeakerVoice;
+        string defaultVoice = SpeakerVoice;
 
         var res = new List<string[]>();
         if (string.IsNullOrEmpty(input)) return res;
@@ -161,14 +286,14 @@ public class AppleSpeech : ISpeech
         _ = SpeakDialogAsync(text, delay);
     }
     private async Task SpeakDialogAsync(string text, float delay = 0f)
-    {   
+    {
         if (Main.Settings.LogVoicedLines)
         {
             Main.Logger.Log($"SpeakerGender: {SpeakerGender}");
             string text_safe = text.Replace("<", "&lt;").Replace(">", "&gt;");
             Main.Logger.Log($"SpeakDialog: {text_safe}");
         }
-        
+
         text = Regex.Replace(text, @"<link[^>]*>(.*?)</link>", "$1",
     RegexOptions.Singleline | RegexOptions.IgnoreCase);
         if (string.IsNullOrEmpty(text))
@@ -183,73 +308,163 @@ public class AppleSpeech : ISpeech
             return;
         }
         var list = BuildSpeakList(text);
+                    // >>> Spiel drosseln bis ALLES (inkl. Pausen) vorbei ist
+        using (new WwiseDuckScope(0.2f)) // 20% Masterlautstärke
+        {
         foreach (var entry in list)
         {
-            string text2 = PrepareDialogText(entry[0]);
-            text2 = AppleVoiceUnity.EscapeForBash(text2);
-            string str = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ") + " Sirisay" + entry[1] + " " + "\\\"" + text2 + "\\\"";
+            // entry[0] = Text, entry[1] = Optionen/Flags für Sirisay (wie gehabt)
+            string prepared = PrepareDialogText(entry[0]); // ← hier steht bereits [[slnc N]]
+            var segments = ParseSlnc(prepared);
 
-            await Task.Run(() =>
+            foreach (var seg in segments)
             {
-                using (var process = new Process())
+                // 1) sprechen (nur wenn seg.Text nicht leer/whitespace)
+                if (!string.IsNullOrWhiteSpace(seg.Text))
                 {
-                    process.StartInfo = new ProcessStartInfo
+                    string text2 = AppleVoiceUnity.EscapeForBash(seg.Text);
+                    string script = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ");
+                    string cmd = $"{script} Sirisay{entry[1]} \\\"{text2}\\\"";
+
+                    await Task.Run(() =>
                     {
-                        FileName = "/bin/bash",
-                        Arguments = "-c \"" + str + "\"",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    };
-                    process.Start();
-                    if (Main.Settings.LogVoicedLines)
-                        Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
-                    process.WaitForExit(); // blockiert nur in diesem Hintergrund-Thread
+                        using (var process = new Process())
+                        {
+                            process.StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "/bin/bash",
+                                Arguments = "-c \"" + cmd + "\"",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            };
+                            process.Start();
+                            if (Main.Settings.LogVoicedLines)
+                                Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
+                            process.WaitForExit(); // blockiert nur in diesem Hintergrund-Thread
+                        }
+                    });
                 }
-            });
+
+                    // 2) Pause danach
+                    if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
+                    {
+                        await Task.Delay(seg.PauseMs.Value); // nicht blockierend
+                    }
+                    else
+                    {
+                        await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+                    }
+            }
+
+        }
         }
     }
 
     public void SpeakAs(string text, VoiceType voiceType, float delay = 0f)
-	{
-		if (string.IsNullOrWhiteSpace(text))
-		{
-			Main.Logger?.Warning("No text to speak!");
-			return;
-		}
+    {
+        // Wrapper, damit bestehende Aufrufer mit der alten Signatur weiterhin funktionieren.
+        // Fire-and-forget ist hier konsistent mit dem bisherigen Verhalten von Process.Start.
+        _ = SpeakAsAsync(text, voiceType, delay);
+    }
 
-		if (!Main.Settings!.UseGenderSpecificVoices)
-		{
-			Speak(text, delay);
-			return;
-		}
+    public async Task SpeakAsAsync(string text, VoiceType voiceType, float delay = 0f)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            Main.Logger?.Warning("No text to speak!");
+            return;
+        }
 
-		// strip embedded quotes from the spoken text to avoid breaking the format
-		var sanitized = text.Replace("\"", "");
+        // Falls genderspezifische Stimmen nicht genutzt werden sollen, altes Verhalten beibehalten.
+        if (!Main.Settings!.UseGenderSpecificVoices)
+        {
+            // Annahme: Die bestehende Speak-Methode kümmert sich selbst um evtl. delay.
+            Speak(text, delay);
+            return;
+        }
 
-		// Build "voice" "text"
-		string formatted;
-		switch (voiceType)
-		{
-			case VoiceType.Narrator:
-				formatted = $"\"Sirisay{Main.NarratorVoice}\" \"{sanitized}\"";
-				break;
+        // Optionaler Initial-Delay (wie bisher über Parameter steuerbar)
+        if (delay > 0f)
+        {
+            var ms = (int)(delay * 1000f);
+            await Task.Delay(ms);
+        }
 
-			case VoiceType.Female:
-				formatted = $"\"Sirisay{Main.FemaleVoice}\" \"{sanitized}\"";
-				break;
+        // 1) Text vorbereiten (hier stehen bereits [[slnc N]] Marker drin)
+        string prepared = PrepareDialogText(text);
 
-			case VoiceType.Male:
-				formatted = $"\"Sirisay{Main.MaleVoice}\" \"{sanitized}\"";
-				break;
+        // 2) In Segmente + Pausen aufteilen
+        var segments = ParseSlnc(prepared);
 
-			default:
-				throw new ArgumentOutOfRangeException(nameof(voiceType), voiceType, null);
-		}
-		Process.Start(Unity.AppleVoiceUnity.GetScriptPath(), formatted);
-	}
+        // 3) Voice-Auswahl bestimmen
+        string voiceCmd = voiceType switch
+        {
+            VoiceType.Narrator => $"Sirisay{Main.NarratorVoice}",
+            VoiceType.Female   => $"Sirisay{Main.FemaleVoice}",
+            VoiceType.Male     => $"Sirisay{Main.MaleVoice}",
+            _ => throw new ArgumentOutOfRangeException(nameof(voiceType), voiceType, null)
+        };
+
+        string scriptPath = Unity.AppleVoiceUnity.GetScriptPath();
+
+        // 4) Segmente nacheinander abspielen und optionale Pause einlegen
+        foreach (var seg in segments)
+        {
+            // sprechen (nur wenn Text vorhanden)
+            if (!string.IsNullOrWhiteSpace(seg.Text))
+            {
+                // robustes Escaping für den Shell-Aufruf
+                string escapedText = AppleVoiceUnity.EscapeForBash(seg.Text);
+
+                // Wir halten uns an das bisherige Aufrufschema: <script> "<voiceCmd>" "<text>"
+                string args = $"\"{voiceCmd}\" \"{escapedText}\"";
+
+                await Task.Run(() =>
+                {
+                    using (var process = new Process())
+                    {
+                        process.StartInfo = new ProcessStartInfo
+                        {
+                            FileName = scriptPath,
+                            Arguments = args,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        };
+
+                        process.Start();
+
+                        if (Main.Settings.LogVoicedLines)
+                            Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
+
+                        // Warten, damit Segmente seriell gesprochen werden
+                        process.WaitForExit();
+                    }
+                });
+            }
+
+            // optionale Pause nach dem Segment
+            if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
+            {
+                await Task.Delay(seg.PauseMs.Value);
+            }
+            else
+            {
+                await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+            }
+        }
+    }
+
     public void Speak(string text, float delay = 0f)
+    {
+        // Wrapper, damit bestehende Aufrufer mit der alten Signatur weiterhin funktionieren.
+        // Fire-and-forget ist hier konsistent mit dem bisherigen Verhalten von Process.Start.
+        _ = SpeakAsync(text, delay);
+    }
+    public async Task SpeakAsync(string text, float delay = 0f)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -259,7 +474,7 @@ public class AppleSpeech : ISpeech
 
         text = PrepareSpeechText(text);
 
-        SpeakInternal(text, delay);
+        await SpeakInternal(text, delay);
     }
 
     public void Stop()

@@ -14,7 +14,7 @@ public static class MenuGUI
     public static void OnGui()
     {
 
-#if DEBUG
+
         GUILayout.BeginVertical("", GUI.skin.box);
 
         GUILayout.BeginHorizontal();
@@ -23,17 +23,34 @@ public static class MenuGUI
         GUILayout.EndHorizontal();
 
         GUILayout.EndVertical();
-#endif
-#if DEBUG
-        GUILayout.BeginVertical("", GUI.skin.box);
 
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("Play Barks", GUILayout.ExpandWidth(false));
-        Main.Settings.PlayBarks = GUILayout.Toggle(Main.Settings.PlayBarks, "Enabled");
-        GUILayout.EndHorizontal();
+        if (Main.Speech is AppleSpeech)
+        {
+            GUILayout.BeginVertical("", GUI.skin.box);
 
-        GUILayout.EndVertical();
-#endif
+            // Play Barks
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Play Barks", GUILayout.ExpandWidth(false));
+            Main.Settings.PlayBarks = GUILayout.Toggle(Main.Settings.PlayBarks, "Enabled");
+            GUILayout.EndHorizontal();
+
+            // Play Bark Subtitles
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Play Bark Subtitles", GUILayout.ExpandWidth(false));
+            Main.Settings.PlayBarksSubtitles = GUILayout.Toggle(Main.Settings.PlayBarksSubtitles, "Enabled");
+            GUILayout.EndHorizontal();
+
+            // Mute Game-Sound on Play
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Mute Game-Sound on Play", GUILayout.ExpandWidth(false));
+            Main.Settings.MuteOnPlay = GUILayout.Toggle(
+                Main.Settings.MuteOnPlay,
+                Main.Settings.MuteOnPlay ? "Mute Voice/Dialog" : "No Change"
+            );
+            GUILayout.EndHorizontal();
+
+            GUILayout.EndVertical();
+        }
         AddVoiceSelector("Narrator Voice - See nationality below", ref Main.Settings.NarratorVoice, ref m_NarratorPreviewText, ref Main.Settings.NarratorRate, ref Main.Settings.NarratorVolume, ref Main.Settings.NarratorPitch, VoiceType.Narrator);
 
         GUILayout.BeginVertical("", GUI.skin.box);
