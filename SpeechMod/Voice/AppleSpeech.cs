@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Kingmaker.Blueprints;
 using Kingmaker.Sound;
+using Kingmaker.Settings;
 using System.Collections.Concurrent;
 using UnityEngine;
 
@@ -19,30 +20,68 @@ public class AppleSpeech : ISpeech
 {
     public sealed class WwiseDuckScope : IDisposable
     {
-        private readonly float _prev;
+        private float _prev_voice;
+        private float _prev_dialog;
+        private float _prev_music;
         private bool _done;
 
         public WwiseDuckScope(float target01 = 0.2f)
         {
-            if (!Main.Settings.MuteOnPlay)
+            if (!Main.Settings.DuckOnPlay)
             {
                 _done = true;
                 return; // no ducking
             }
-            // Wir sparen uns AKRESULT & GetRTPCValue, setzen direkt
-            _prev = 100f; // Standardwert annehmen, wenn du nicht lesen kannst
-            //AkSoundEngine.SetRTPCValue("AudioLevel", target01, null, 0);
-            AkSoundEngine.SetRTPCValue("VoiceLevel", target01, null, 0);
-            AkSoundEngine.SetRTPCValue("DialogueLevel", target01, null, 0);
+
+            try
+            {
+                // --- 1) Werte direkt aus den Spiel-Einstellungen holen (0..100)
+                var snd = SettingsRoot.Sound;
+
+                _prev_voice  = snd?.VolumeVoices?.GetTempValue()   ?? 100f;
+                _prev_dialog = snd?.VolumeDialogue?.GetTempValue() ?? 100f;
+
+                // Music beachtet MuteMusic: Controller setzt in dem Fall 0 in MusicLevel
+                bool musicMuted = snd?.MuteMusic?.GetTempValue() ?? false;
+                _prev_music = musicMuted ? 0f : (snd?.VolumeMusic?.GetTempValue() ?? 100f);
+            }
+            catch
+            {
+                // Fallback, falls Settings unerwartet nicht verfügbar sind
+                _prev_voice = _prev_dialog = _prev_music = 100f;
+            }
+
+            // --- 2) Ducking-Ziel (0..1) invertieren -> Projekt-Skala (0..100)
+            float target = (1f - Mathf.Clamp01(target01)) * 100f;
+
+            // Prozent der Originalwerte erhalten
+            float factor = Mathf.Clamp01(target01); // 0 = 100% Dämpfung, 1 = keine Dämpfung
+
+            float targetVoice   = _prev_voice  * factor;
+            float targetDialog  = _prev_dialog * factor;
+            float targetMusic   = _prev_music  * factor;
+
+            /* if (Main.Settings.LogVoicedLines)
+                Main.Logger.Log($"WwiseDuckScope(Settings): " +
+                                $"VoiceLevel {_prev_voice} -> {targetVoice}, " +
+                                $"DialogueLevel {_prev_dialog} -> {targetDialog}, " +
+                                $"MusicLevel {_prev_music} -> {targetMusic}");
+ */
+            // --- 3) Duck setzen
+            AkSoundEngine.SetRTPCValue("VoiceLevel",    targetVoice, null, 0);
+            AkSoundEngine.SetRTPCValue("DialogueLevel", targetDialog, null, 0);
+            AkSoundEngine.SetRTPCValue("MusicLevel",    targetMusic, null, 0);
         }
 
         public void Dispose()
         {
             if (_done) return;
             _done = true;
-            //AkSoundEngine.SetRTPCValue("AudioLevel", _prev, null, 0);
-            AkSoundEngine.SetRTPCValue("VoiceLevel", _prev, null, 0);
-            AkSoundEngine.SetRTPCValue("DialogueLevel", _prev, null, 0);
+
+            // Zurück zu den Spiel-Einstellungen (inkl. Mute-Logik, die wir oben schon berücksichtigt haben)
+            AkSoundEngine.SetRTPCValue("VoiceLevel",    _prev_voice,  null, 0);
+            AkSoundEngine.SetRTPCValue("DialogueLevel", _prev_dialog, null, 0);
+            AkSoundEngine.SetRTPCValue("MusicLevel",    _prev_music,  null, 0);
         }
     }
     public readonly struct SlncSegment
@@ -154,52 +193,54 @@ public class AppleSpeech : ISpeech
         // vorbereiten: [[slnc N]] bleibt im Text enthalten
         string prepared = PrepareDialogText(text);
         var segments = ParseSlnc(prepared);
-
-        foreach (var seg in segments)
+        using (new WwiseDuckScope(Main.Settings.DuckOnPlayVolume)) // 20% Masterlautstärke
         {
-            // 1) sprechen (nur wenn seg.Text nicht leer ist)
-            if (!string.IsNullOrWhiteSpace(seg.Text))
+            foreach (var seg in segments)
             {
-                // Falls ein Startdelay gesetzt wurde, nur beim ersten Segment anwenden
-                if (delay > 0f)
+                // 1) sprechen (nur wenn seg.Text nicht leer ist)
+                if (!string.IsNullOrWhiteSpace(seg.Text))
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(delay));
-                    delay = 0f; // nur einmal anwenden
+                    // Falls ein Startdelay gesetzt wurde, nur beim ersten Segment anwenden
+                    if (delay > 0f)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(delay));
+                        delay = 0f; // nur einmal anwenden
+                    }
+
+                    string text2 = AppleVoiceUnity.EscapeForBash(seg.Text);
+                    string script = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ");
+                    string cmd = $"{script} Sirisay{Main.NarratorVoice} \\\"{text2}\\\"";
+
+                    await Task.Run(() =>
+                    {
+                        using (var process = new Process())
+                        {
+                            process.StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "/bin/bash",
+                                Arguments = "-c \"" + cmd + "\"",
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            };
+                            process.Start();
+                            if (Main.Settings.LogVoicedLines)
+                                Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
+                            process.WaitForExit();
+                        }
+                    });
                 }
 
-                string text2 = AppleVoiceUnity.EscapeForBash(seg.Text);
-                string script = Unity.AppleVoiceUnity.GetScriptPath().Replace(" ", "\\ ");
-                string cmd = $"{script} Sirisay{Main.NarratorVoice} \\\"{text2}\\\"";
-
-                await Task.Run(() =>
+                // 2) Pause danach (falls von [[slnc N]] vorgegeben)
+                if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
                 {
-                    using (var process = new Process())
-                    {
-                        process.StartInfo = new ProcessStartInfo
-                        {
-                            FileName = "/bin/bash",
-                            Arguments = "-c \"" + cmd + "\"",
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            CreateNoWindow = true
-                        };
-                        process.Start();
-                        if (Main.Settings.LogVoicedLines)
-                            Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
-                        process.WaitForExit();
-                    }
-                });
-            }
-
-            // 2) Pause danach (falls von [[slnc N]] vorgegeben)
-            if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
-            {
-                await Task.Delay(seg.PauseMs.Value);
-            }
-            else
-            {
-                await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+                    await Task.Delay(seg.PauseMs.Value);
+                }
+                else
+                {
+                    await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+                }
             }
         }
     }
@@ -249,7 +290,7 @@ public class AppleSpeech : ISpeech
         if (string.IsNullOrEmpty(input)) return res;
 
         // <i ...>...</i> (beliebige Attribute, case-insensitive, über Zeilen)
-        var iTag = new Regex(@"<color\s*=\s*#616060>(.*?)</color>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        var iTag = new Regex(@"<color=#616060>((?:(?>[^<]+)|<(?!/?color\b)|(?<open><color(?:\s*=\s*#[0-9A-Fa-f]{3,8})?\s*>)|(?<-open></color>))*(?(open)(?!)))</color>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
         int pos = 0;
         foreach (Match m in iTag.Matches(input))
@@ -309,7 +350,7 @@ public class AppleSpeech : ISpeech
         }
         var list = BuildSpeakList(text);
                     // >>> Spiel drosseln bis ALLES (inkl. Pausen) vorbei ist
-        using (new WwiseDuckScope(0.2f)) // 20% Masterlautstärke
+        using (new WwiseDuckScope(Main.Settings.DuckOnPlayVolume)) // 20% Masterlautstärke
         {
         foreach (var entry in list)
         {
@@ -402,58 +443,61 @@ public class AppleSpeech : ISpeech
         string voiceCmd = voiceType switch
         {
             VoiceType.Narrator => $"Sirisay{Main.NarratorVoice}",
-            VoiceType.Female   => $"Sirisay{Main.FemaleVoice}",
-            VoiceType.Male     => $"Sirisay{Main.MaleVoice}",
+            VoiceType.Female => $"Sirisay{Main.FemaleVoice}",
+            VoiceType.Male => $"Sirisay{Main.MaleVoice}",
             _ => throw new ArgumentOutOfRangeException(nameof(voiceType), voiceType, null)
         };
 
         string scriptPath = Unity.AppleVoiceUnity.GetScriptPath();
 
         // 4) Segmente nacheinander abspielen und optionale Pause einlegen
-        foreach (var seg in segments)
+        using (new WwiseDuckScope(Main.Settings.DuckOnPlayVolume)) // 20% Masterlautstärke
         {
-            // sprechen (nur wenn Text vorhanden)
-            if (!string.IsNullOrWhiteSpace(seg.Text))
+            foreach (var seg in segments)
             {
-                // robustes Escaping für den Shell-Aufruf
-                string escapedText = AppleVoiceUnity.EscapeForBash(seg.Text);
-
-                // Wir halten uns an das bisherige Aufrufschema: <script> "<voiceCmd>" "<text>"
-                string args = $"\"{voiceCmd}\" \"{escapedText}\"";
-
-                await Task.Run(() =>
+                // sprechen (nur wenn Text vorhanden)
+                if (!string.IsNullOrWhiteSpace(seg.Text))
                 {
-                    using (var process = new Process())
+                    // robustes Escaping für den Shell-Aufruf
+                    string escapedText = AppleVoiceUnity.EscapeForBash(seg.Text);
+
+                    // Wir halten uns an das bisherige Aufrufschema: <script> "<voiceCmd>" "<text>"
+                    string args = $"\"{voiceCmd}\" \"{escapedText}\"";
+
+                    await Task.Run(() =>
                     {
-                        process.StartInfo = new ProcessStartInfo
+                        using (var process = new Process())
                         {
-                            FileName = scriptPath,
-                            Arguments = args,
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            CreateNoWindow = true
-                        };
+                            process.StartInfo = new ProcessStartInfo
+                            {
+                                FileName = scriptPath,
+                                Arguments = args,
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                CreateNoWindow = true
+                            };
 
-                        process.Start();
+                            process.Start();
 
-                        if (Main.Settings.LogVoicedLines)
-                            Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
+                            if (Main.Settings.LogVoicedLines)
+                                Main.Logger.Log($"Final Speak Command: {process.StartInfo.FileName} {process.StartInfo.Arguments}");
 
-                        // Warten, damit Segmente seriell gesprochen werden
-                        process.WaitForExit();
-                    }
-                });
-            }
+                            // Warten, damit Segmente seriell gesprochen werden
+                            process.WaitForExit();
+                        }
+                    });
+                }
 
-            // optionale Pause nach dem Segment
-            if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
-            {
-                await Task.Delay(seg.PauseMs.Value);
-            }
-            else
-            {
-                await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+                // optionale Pause nach dem Segment
+                if (seg.PauseMs.HasValue && seg.PauseMs.Value > 0)
+                {
+                    await Task.Delay(seg.PauseMs.Value);
+                }
+                else
+                {
+                    await Task.Delay(100); // kurze Pause, damit nicht alles ineinanderfließt - Siribugfix
+                }
             }
         }
     }

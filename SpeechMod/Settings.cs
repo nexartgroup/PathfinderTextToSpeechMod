@@ -40,7 +40,8 @@ public class Settings : UnityModManager.ModSettings
     public bool[] FontStyles = [false, false, false, true, false, false, false, false, false, false, false];
 
     public bool InterruptPlaybackOnPlay = true;
-    public bool MuteOnPlay = true;
+    public bool DuckOnPlay = true;
+    public float DuckOnPlayVolume = 0.2f;
 
     public bool ShowNotificationOnPlaybackStop = true;
 

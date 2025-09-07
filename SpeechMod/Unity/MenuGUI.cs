@@ -40,15 +40,25 @@ public static class MenuGUI
             Main.Settings.PlayBarksSubtitles = GUILayout.Toggle(Main.Settings.PlayBarksSubtitles, "Enabled");
             GUILayout.EndHorizontal();
 
-            // Mute Game-Sound on Play
+            // Duck Game-Sound on Play
             GUILayout.BeginHorizontal();
-            GUILayout.Label("Mute Game-Sound on Play", GUILayout.ExpandWidth(false));
-            Main.Settings.MuteOnPlay = GUILayout.Toggle(
-                Main.Settings.MuteOnPlay,
-                Main.Settings.MuteOnPlay ? "Mute Voice/Dialog" : "No Change"
+            GUILayout.Label("Duck Game-Sounds on Play", GUILayout.ExpandWidth(false));
+            Main.Settings.DuckOnPlay = GUILayout.Toggle(
+                Main.Settings.DuckOnPlay,
+                Main.Settings.DuckOnPlay ? "Duck Voice/Dialog/Music" : "No Change"
             );
             GUILayout.EndHorizontal();
+            if (Main.Settings.DuckOnPlay)
+            {
+                // Duck Volume
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Ducking Intensity", GUILayout.ExpandWidth(false));
+                Main.Settings.DuckOnPlayVolume = GUILayout.HorizontalSlider(Main.Settings.DuckOnPlayVolume, 1.0f, 0.0f, GUILayout.Width(300f));
+                GUILayout.Label($" {(1f - Main.Settings.DuckOnPlayVolume) * 100f:0}% Ducking", GUILayout.ExpandWidth(false));
+                GUILayout.EndHorizontal();
 
+                
+            }
             GUILayout.EndVertical();
         }
         AddVoiceSelector("Narrator Voice - See nationality below", ref Main.Settings.NarratorVoice, ref m_NarratorPreviewText, ref Main.Settings.NarratorRate, ref Main.Settings.NarratorVolume, ref Main.Settings.NarratorPitch, VoiceType.Narrator);
